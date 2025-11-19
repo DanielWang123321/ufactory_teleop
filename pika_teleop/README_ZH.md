@@ -45,7 +45,6 @@ source py39/bin/activate
 ```bash
 pip install -r requirements.txt
 pip install pysurvive
-pip install pika
 ```
 
 ## 使用说明
