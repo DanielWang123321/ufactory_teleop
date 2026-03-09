@@ -70,6 +70,7 @@ python uf_robot_pika_teleop.py <robot_ip> [robot_mode] [gripper_type]
 - `1`: xArm Gripper
 - `2`: xArm Gripper G2
 - `3`: BIO Gripper G2
+- `4`: Pika Gripper
 
 ### How to Use
 
