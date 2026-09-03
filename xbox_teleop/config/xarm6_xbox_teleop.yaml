@@ -1,0 +1,14 @@
+RobotConfig:
+  robot_ip: "192.168.1.83"
+  gripper_type: 0
+  start_joints: [0, -0.5235987755982988, -0.4014257279586958, 0, 0.9250245035569946, 0]
+  start_tcp_pose: [300, 0, 300, 3.1415927, 0, 0]
+
+TeleoperatorConfig:
+  fps: 30
+  leveling_speed: 45
+  homing_speed: 45
+  cartesian_speed: 200
+  direction: 0
+  xbox_deadzone: [0.15, 0.15, 0.1, 0.2, 0.2, 0.1]
+  xbox_max_dist: [500, 500, 500, 60, 60, 60]

@@ -1,0 +1,4 @@
+inputs
+evdev; sys_platform != 'win32'
+pyyaml
+git+https://github.com/xArm-Developer/xArm-Python-SDK.git@master
