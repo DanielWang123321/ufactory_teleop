@@ -14,29 +14,29 @@ from dataclasses import dataclass
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from ufactory_devices.robot import UFRobotConfig, UFRobot
-from ufactory_devices.xbox import XBoxDevice
+from ufactory_devices.spacemouse import SpaceDevice
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger('xbox_teleop')
+logger = logging.getLogger('spacemouse_teleop')
 
 @dataclass
-class XBoxTeleopConfig:
+class SpaceMouseTeleopConfig:
     fps: int = 30
     leveling_speed: int = 45
     homing_speed: int = 45
     cartesian_speed: int = 200
     direction: int = 0  # 0: default, 90: rotate left, 180: rotate 180, 270: rotate right
-    axes_deadzone: Tuple[int, ...] = (0.15, 0.15, 0.1, 0.2, 0.2, 0.1)
+    axes_deadzone: Tuple[int, ...] = (0.15, 0.15, 0.10, 0.15, 0.15, 0.10)
     max_distances: Tuple[int, ...] = (500, 500, 500, 60, 60, 60)
 
 
 class UFRobotTeleop(object):
-    def __init__(self, config: XBoxTeleopConfig, robot_config: UFRobotConfig):
+    def __init__(self, config: SpaceMouseTeleopConfig, robot_config: UFRobotConfig):
         self.config = config
 
-        self._xbox = XBoxDevice(axes_deadzone=self.config.axes_deadzone, logger=logger)
-        self._xbox.start()
+        self._spacemouse = SpaceDevice(axes_deadzone=self.config.axes_deadzone, logger=logger)
+        self._spacemouse.start()
 
         self.robot = UFRobot(robot_config)
         self.arm = self.robot.real_arm
@@ -49,7 +49,7 @@ class UFRobotTeleop(object):
 
     def _robot_motion_loop(self):
         sleep_time = 1 / self.config.fps
-        logger.info(f"[XBox] Robot motion loop started with {self.config.fps} FPS.")
+        logger.info(f"[SpaceMouse] Robot motion loop started with {self.config.fps} FPS.")
         while self.arm and self.arm.connected:
             if self.arm.error_code != 0:
                 time.sleep(1)
@@ -65,7 +65,7 @@ class UFRobotTeleop(object):
                     time.sleep(0.2)
 
                 if self._motion_type == 2:  # leveling
-                    logger.info(f"[XBox] Leveling started")
+                    logger.info(f"[SpaceMouse] Leveling started")
                     _, angles = self.arm.get_servo_angle()
                     if self.arm.axis == 5:
                         angles[3] = -(angles[1] + angles[2])
@@ -79,7 +79,7 @@ class UFRobotTeleop(object):
                             angles = ret
                     self.arm.set_servo_angle(angle=angles, speed=self.config.leveling_speed)
                 else:  # zeroing
-                    logger.info(f"[XBox] Homing started")
+                    logger.info(f"[SpaceMouse] Homing started")
                     self.arm.move_gohome(speed=self.config.homing_speed)
 
                 self._motion_type = -self._motion_type
@@ -97,60 +97,52 @@ class UFRobotTeleop(object):
                     self.cartesian_base_pose, self.cartesian_pose_delta)]
                 self.arm.set_position(*pose, speed=self.config.cartesian_speed)
             time.sleep(sleep_time)
-        logger.info("[XBox] Robot motion loop completed.")
+        logger.info("[SpaceMouse] Robot motion loop completed.")
 
     def run(self):
         self._motion_thread = threading.Thread(target=self._robot_motion_loop, daemon=True)
         self._motion_thread.start()
 
-        axes = self._xbox.axes
-        buttons = self._xbox.buttons
-        direction = self._xbox.direction
         trigger_activated = False
-
-        xbox_activated = False
-        xbox_z_reversed = False
+        spacemouse_activated = False
         self._motion_type = 0
 
         left_cnt = 0
         right_cnt = 0
-        left_button_pressed = False   # START
-        left_button_long_pressed = False  # START
-        right_button_pressed = False  # SELECT
-        right_button_long_pressed = False # SELECT
+        left_button_long_pressed = False
+        right_button_long_pressed = False
         zero = 0.01
-        xyz_is_zero = True
-        rpy_is_zero = True
 
         warning_logged = False
 
-        logger.info("[Xbox] Teleoperation started. Press START + SELECT for 0.5s to activate/deactivate control.")
+        logger.info("[SpaceMouse] Teleoperation started. Press LEFT + RIGHT for 0.5s to activate/deactivate control.")
 
         while self.arm and self.arm.connected:
             time.sleep(0.01)
 
-            if not self._xbox.connected:
+            if not self._spacemouse.connected:
                 if not warning_logged:
-                    logger.warning("XBox controller is not connected. Please check the connection.")
+                    logger.warning("SpaceMouse controller is not connected. Please check the connection.")
                     warning_logged = True
                 trigger_activated = False
-                xbox_activated = False
-                xbox_z_reversed = False
+                spacemouse_activated = False
                 left_cnt = 0
                 right_cnt = 0
-                left_button_pressed = False
                 left_button_long_pressed = False
-                right_button_pressed = False
                 right_button_long_pressed = False
                 if self._motion_type != 0:
                     self._motion_type = 0
-                    logger.info("[Xbox] Motion over due to controller disconnection")
+                    logger.info("[SpaceMouse] Motion over due to controller disconnection")
                     self.arm.set_state(6)
                 continue
             warning_logged = False
 
-            btn_left_pressed = buttons.START.value == 1
-            btn_right_pressed = buttons.SELECT.value == 1
+            state = self._spacemouse.state
+            if len(state.buttons) < 2:
+                continue
+
+            btn_left_pressed = state.buttons[0] == 1
+            btn_right_pressed = state.buttons[1] == 1
 
             if btn_left_pressed: # left
                 left_cnt += 1
@@ -169,15 +161,14 @@ class UFRobotTeleop(object):
             if left_button_long_pressed and right_button_long_pressed:
                 # 双键长按0.5s切换激活/关闭
                 if not trigger_activated:
-                    xbox_activated = not xbox_activated
-                    if xbox_activated:
-                        logger.info("[Xbox] Activated, Z/YAW Positive")
-                        xbox_z_reversed = False
+                    spacemouse_activated = not spacemouse_activated
+                    if spacemouse_activated:
+                        logger.info("[SpaceMouse] Activated")
                     else:
-                        logger.info("[Xbox] Deactivated")
+                        logger.info("[SpaceMouse] Deactivated")
                 trigger_activated = True
 
-            is_trigger_zero_motion = xbox_activated and not trigger_activated and self.arm.connected
+            is_trigger_zero_motion = spacemouse_activated and not trigger_activated and self.arm.connected
 
             if is_trigger_zero_motion and left_button_long_pressed and not btn_right_pressed:
                 if abs(self._motion_type) not in [2, 3] and self.arm.error_code == 0:
@@ -188,15 +179,15 @@ class UFRobotTeleop(object):
 
             # end leveling/zeroing on button release (pos=waiting, neg=executed)
             if abs(self._motion_type) == 2 and not btn_left_pressed:
-                logger.info("[Xbox] Leveling over")
+                logger.info("[SpaceMouse] Leveling over")
                 self._motion_type = 0
                 self.arm.set_state(6)
             if abs(self._motion_type) == 3 and not btn_right_pressed:
-                logger.info("[Xbox] Homing over")
+                logger.info("[SpaceMouse] Homing over")
                 self._motion_type = 0
                 self.arm.set_state(6)
 
-            if not xbox_activated:
+            if not spacemouse_activated:
                 if not btn_left_pressed and not btn_right_pressed:
                     trigger_activated = False
                 self._motion_type = 0
@@ -204,15 +195,6 @@ class UFRobotTeleop(object):
                 right_button_long_pressed = False
                 continue
 
-            is_single_click_trigger = not trigger_activated and abs(self._motion_type) not in [2, 3] and not left_button_long_pressed and not right_button_long_pressed
-
-            if is_single_click_trigger:
-                if left_button_pressed and not btn_left_pressed:
-                    xbox_z_reversed = not xbox_z_reversed
-                    logger.info('[Xbox] Z/YAW {}'.format('Positive' if not xbox_z_reversed else 'Negative'))
-
-            left_button_pressed = btn_left_pressed
-            right_button_pressed = btn_right_pressed
             if not btn_left_pressed:
                 left_button_long_pressed = False
             if not btn_right_pressed:
@@ -225,18 +207,18 @@ class UFRobotTeleop(object):
             if self.arm.error_code != 0:
                 if self._motion_type != 0:
                     self._motion_type = 0
-                    logger.info("[Xbox] Motion over due to robot error")
+                    logger.info("[SpaceMouse] Motion over due to robot error")
                     self.arm.set_state(6)
                     time.sleep(0.1)
                 continue
 
-            _xyz_is_zero = abs(axes.X.value) <= zero and abs(axes.Y.value) <= zero and abs(axes.Z.value) <= zero
-            _rpy_is_zero = abs(axes.RX.value) <= zero and abs(axes.RY.value) <= zero and abs(axes.RZ.value) <= zero
+            _xyz_is_zero = abs(state.x) <= zero and abs(state.y) <= zero and abs(state.z) <= zero
+            _rpy_is_zero = abs(state.roll) <= zero and abs(state.pitch) <= zero and abs(state.yaw) <= zero
 
             if _xyz_is_zero and _rpy_is_zero:
                 if self._motion_type != 0:
                     self._motion_type = 0
-                    logger.info("[Xbox] Motion over due to zero input")
+                    logger.info("[SpaceMouse] Motion over due to zero input")
                     self.arm.set_state(6)
                 continue
 
@@ -244,70 +226,45 @@ class UFRobotTeleop(object):
                 self._motion_type = 1
                 _, pose = self.arm.get_position()
                 self.cartesian_base_pose = pose
-                logger.info(f"[Xbox] Cartesian motion started: {pose}")
-                xyz_is_zero = _xyz_is_zero
-                rpy_is_zero = _rpy_is_zero
+                logger.info(f"[SpaceMouse] Cartesian motion started: {pose}")
             else:
-                if (not xyz_is_zero and _xyz_is_zero) or (not rpy_is_zero and _rpy_is_zero):
-                    _, pose = self.arm.get_position()
-                    if not xyz_is_zero and _xyz_is_zero:
-                        self.cartesian_base_pose[0] = pose[0]
-                        self.cartesian_base_pose[1] = pose[1]
-                        self.cartesian_base_pose[2] = pose[2]
-                    if not rpy_is_zero and _rpy_is_zero:
-                        self.cartesian_base_pose[3] = pose[3]
-                        self.cartesian_base_pose[4] = pose[4]
-                        self.cartesian_base_pose[5] = pose[5]
-                xyz_is_zero = _xyz_is_zero
-                rpy_is_zero = _rpy_is_zero
-
                 x_zero = False
                 y_zero = False
+                z_zero = False
                 dx_zero = False
                 dy_zero = False
-
-                if buttons.X.value == 1 or buttons.Y.value == 1:
-                    x_zero = False if buttons.X.value == 1 else True
-                    y_zero = False if buttons.Y.value == 1 else True
-                    dx_zero = True
-                    dy_zero = True
-                elif buttons.A.value == 1 or buttons.B.value == 1:
-                    x_zero = True
-                    y_zero = True
-                    dx_zero = False if buttons.A.value == 1 else True
-                    dy_zero = False if buttons.B.value == 1 else True
+                dz_zero = False
 
                 d = self.config.max_distances
                 if self.config.direction == 180:
-                    self.cartesian_pose_delta[0] = -axes.Y.value * d[0] if not x_zero else 0
-                    self.cartesian_pose_delta[1] = axes.X.value * d[1] if not y_zero else 0
-                    self.cartesian_pose_delta[3] = -axes.RX.value * d[3] if not dx_zero else 0
-                    self.cartesian_pose_delta[4] = -axes.RY.value * d[4] if not dy_zero else 0
+                    self.cartesian_pose_delta[0] = -state.y * d[0] if not x_zero else 0
+                    self.cartesian_pose_delta[1] = state.x * d[1] if not y_zero else 0
+                    self.cartesian_pose_delta[2] = state.z * d[2] if not z_zero else 0
+                    self.cartesian_pose_delta[3] = -state.roll * d[3] if not dx_zero else 0
+                    self.cartesian_pose_delta[4] = -state.pitch * d[4] if not dy_zero else 0
+                    self.cartesian_pose_delta[5] = -state.yaw * d[5] if not dz_zero else 0
                 elif self.config.direction == 90:
-                    self.cartesian_pose_delta[0] = -axes.X.value * d[0] if not x_zero else 0
-                    self.cartesian_pose_delta[1] = -axes.Y.value * d[1] if not y_zero else 0
-                    self.cartesian_pose_delta[3] = axes.RY.value * d[3] if not dx_zero else 0
-                    self.cartesian_pose_delta[4] = -axes.RX.value * d[4] if not dy_zero else 0
+                    self.cartesian_pose_delta[0] = -state.x * d[0] if not x_zero else 0
+                    self.cartesian_pose_delta[1] = -state.y * d[1] if not y_zero else 0
+                    self.cartesian_pose_delta[2] = state.z * d[2] if not z_zero else 0
+                    self.cartesian_pose_delta[3] = state.pitch * d[3] if not dx_zero else 0
+                    self.cartesian_pose_delta[4] = -state.roll * d[4] if not dy_zero else 0
+                    self.cartesian_pose_delta[5] = -state.yaw * d[5] if not dz_zero else 0
                 elif self.config.direction == 270:
-                    self.cartesian_pose_delta[0] = axes.X.value * d[0] if not x_zero else 0
-                    self.cartesian_pose_delta[1] = axes.Y.value * d[1] if not y_zero else 0
-                    self.cartesian_pose_delta[3] = -axes.RY.value * d[3] if not dx_zero else 0
-                    self.cartesian_pose_delta[4] = axes.RX.value * d[4] if not dy_zero else 0
+                    self.cartesian_pose_delta[0] = state.x * d[0] if not x_zero else 0
+                    self.cartesian_pose_delta[1] = state.y * d[1] if not y_zero else 0
+                    self.cartesian_pose_delta[2] = state.z * d[2] if not z_zero else 0
+                    self.cartesian_pose_delta[3] = -state.pitch * d[3] if not dx_zero else 0
+                    self.cartesian_pose_delta[4] = state.roll * d[4] if not dy_zero else 0
+                    self.cartesian_pose_delta[5] = -state.yaw * d[5] if not dz_zero else 0
                 else:
-                    self.cartesian_pose_delta[0] = axes.Y.value * d[0] if not x_zero else 0
-                    self.cartesian_pose_delta[1] = -axes.X.value * d[1] if not y_zero else 0
-                    self.cartesian_pose_delta[3] = axes.RX.value * d[3] if not dx_zero else 0
-                    self.cartesian_pose_delta[4] = axes.RY.value * d[4] if not dy_zero else 0
-                z_direction = -1 if xbox_z_reversed else 1
-                if direction.Y.value == 1:
-                    # down
-                    z_direction = -1
-                elif direction.Y.value == -1:
-                    # up
-                    z_direction = 1
-                self.cartesian_pose_delta[2] = axes.Z.value * d[2] * z_direction
-                self.cartesian_pose_delta[5] = axes.RZ.value * d[5] * z_direction
-        logger.info("[Xbox] Teleoperation stopped.")
+                    self.cartesian_pose_delta[0] = state.y * d[0] if not x_zero else 0
+                    self.cartesian_pose_delta[1] = -state.x * d[1] if not y_zero else 0
+                    self.cartesian_pose_delta[2] = state.z * d[2] if not z_zero else 0
+                    self.cartesian_pose_delta[3] = state.roll * d[3] if not dx_zero else 0
+                    self.cartesian_pose_delta[4] = state.pitch * d[4] if not dy_zero else 0
+                    self.cartesian_pose_delta[5] = -state.yaw * d[5] if not dz_zero else 0
+        logger.info("[SpaceMouse] Teleoperation stopped.")
 
 
 if __name__ == '__main__':
@@ -323,7 +280,7 @@ if __name__ == '__main__':
         exit(1)
     
     robot_confg = UFRobotConfig(**config['RobotConfig'])
-    teleop_confg = XBoxTeleopConfig(**config['TeleoperatorConfig'])
+    teleop_confg = SpaceMouseTeleopConfig(**config['TeleoperatorConfig'])
     teleop = UFRobotTeleop(teleop_confg, robot_confg)
 
     time.sleep(1)

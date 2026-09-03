@@ -10,5 +10,5 @@ TeleoperatorConfig:
   homing_speed: 45
   cartesian_speed: 200
   direction: 0
-  axes_deadzone: [0.15, 0.15, 0.1, 0.2, 0.2, 0.1]
+  axes_deadzone: [0.15, 0.15, 0.10, 0.15, 0.15, 0.10]
   max_distances: [500, 500, 500, 60, 60, 60]
